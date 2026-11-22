@@ -7,6 +7,11 @@ import { join } from 'node:path';
 const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+// Opcode facts, packed as imm*100 + pops*10 + pushes, in a table built once at load
+// instead of a branch chain evaluated on every step: -1 = unknown opcode.
+const Q = new Int16Array(256).fill(-1);
+for (const [b, q] of [[0,0],[52,0],[1,101],[2,401],[3,10],[80,10],[81,10],[83,10],[4,12],[5,22],[6,23],[7,33],[23,11],[27,11],[16,21],[17,21],[18,21],[19,21],[20,21],[21,21],[22,21],[24,21],[25,21],[26,21],[28,21],[29,21],[30,21],[32,21],[33,21],[34,21],[48,200],[51,200],[49,210],[50,210],[64,11],[65,20],[82,1]]) Q[b] = q;
+
 // Runs one program. Returns [stdout bytes, exit code 0..255].
 function run(p: Uint8Array, inp: Uint8Array): [Uint8Array, number] {
   const D = new Int32Array(256); // data stack
@@ -20,22 +25,7 @@ function run(p: Uint8Array, inp: Uint8Array): [Uint8Array, number] {
     if (st === 1000000) return done(10); // step limit
     if (pc < 0 || pc >= n) return done(9); // pc outside program
     const op = p[pc];
-    // Opcode facts, packed as imm*100 + pops*10 + pushes; -1 = unknown opcode.
-    let q = -1;
-    if (op === 0x00 || op === 0x34) q = 0; // HALT, RET
-    else if (op === 0x01) q = 101; // PUSH8
-    else if (op === 0x02) q = 401; // PUSH32
-    else if (op === 0x03 || op === 0x50 || op === 0x51 || op === 0x53) q = 10; // POP, PRINT, PUTC, EXIT
-    else if (op === 0x04) q = 12; // DUP
-    else if (op === 0x05) q = 22; // SWAP
-    else if (op === 0x06) q = 23; // OVER
-    else if (op === 0x07) q = 33; // ROT
-    else if (op >= 0x10 && op <= 0x22 && op !== 0x1f) q = op === 0x17 || op === 0x1b ? 11 : 21; // ALU
-    else if (op === 0x30 || op === 0x33) q = 200; // JMP, CALL
-    else if (op === 0x31 || op === 0x32) q = 210; // JZ, JNZ
-    else if (op === 0x40) q = 11; // LOAD
-    else if (op === 0x41) q = 20; // STORE
-    else if (op === 0x52) q = 1; // IN
+    const q = Q[op] ?? -1; // opcode facts from the table; -1 = unknown opcode
     if (q < 0) return done(5); // unknown opcode
     const im = (q / 100) | 0, po = ((q / 10) | 0) % 10, pu = q % 10;
     if (pc + im >= n) return done(9); // immediate cut off by program end
